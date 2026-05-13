@@ -109,7 +109,6 @@ export class LiveClient {
           systemInstruction: systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          thinkingConfig: { thinkingBudget: 0 } 
         },
         callbacks: {
           onopen: () => {
