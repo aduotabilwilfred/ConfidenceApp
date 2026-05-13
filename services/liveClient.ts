@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { createBlob, decode, decodeAudioData, float32ToWav } from './audioUtils';
+import { createBlob, decode, decodeAudioData, float32ToWav, normalizeAudioChunks } from './audioUtils';
 import { AUDIO_SAMPLE_RATE_INPUT, AUDIO_SAMPLE_RATE_OUTPUT } from '../constants';
 import { AudioQuality } from '../types';
 
@@ -33,6 +33,7 @@ export class LiveClient {
   private recordingProcessor: ScriptProcessorNode | null = null;
   private recordingHighPass: BiquadFilterNode | null = null;
   private recordingPresence: BiquadFilterNode | null = null; // Mid-boost for clarity
+  private recordingDeEsser: BiquadFilterNode | null = null; // Sibilance reduction
   private recordingAir: BiquadFilterNode | null = null; // High-shelf for "shimmer"
   private recordingCompressor: DynamicsCompressorNode | null = null;
   private recordingLimiter: DynamicsCompressorNode | null = null;
@@ -104,6 +105,7 @@ export class LiveClient {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName } },
           },
+          tools: [], // Explicitly disable tools for faster responses
           systemInstruction: systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -149,6 +151,13 @@ export class LiveClient {
     this.recordingPresence.gain.setValueAtTime(isStudio ? 3.5 : 2.0, now);
     this.recordingPresence.Q.setValueAtTime(1.0, now);
 
+    // 2.5 De-Esser - Reduce harsh sibilance (standard in studio profiles)
+    this.recordingDeEsser = this.outputAudioContext.createBiquadFilter();
+    this.recordingDeEsser.type = 'peaking';
+    this.recordingDeEsser.frequency.setValueAtTime(6500, now);
+    this.recordingDeEsser.gain.setValueAtTime(isStudio ? -4.0 : -1.5, now);
+    this.recordingDeEsser.Q.setValueAtTime(1.5, now);
+
     // 3. Air Filter - High shelf for professional "shimmer" (10kHz+)
     this.recordingAir = this.outputAudioContext.createBiquadFilter();
     this.recordingAir.type = 'highshelf';
@@ -171,19 +180,33 @@ export class LiveClient {
     this.recordingLimiter.attack.setValueAtTime(0.001, now);
     this.recordingLimiter.release.setValueAtTime(0.05, now);
 
-    // Capture Processor
-    this.recordingProcessor = this.outputAudioContext.createScriptProcessor(2048, 1, 1);
+    // Capture Processor + Noise Gate
+    this.recordingProcessor = this.outputAudioContext.createScriptProcessor(1024, 1, 1);
     this.recordedChunks = [];
     this.isRecording = true;
+
+    const gateThreshold = isStudio ? 0.005 : 0.008; // -46dB vs -42dB approx
 
     this.recordingProcessor.onaudioprocess = (e) => {
       if (this.isRecording) {
         const inputData = e.inputBuffer.getChannelData(0);
-        this.recordedChunks.push(new Float32Array(inputData));
+        const processedData = new Float32Array(inputData.length);
+        
+        // Apply simple Noise Gate to recorded output
+        for (let i = 0; i < inputData.length; i++) {
+          const sample = inputData[i];
+          if (Math.abs(sample) < gateThreshold) {
+            processedData[i] = 0;
+          } else {
+            processedData[i] = sample;
+          }
+        }
+        
+        this.recordedChunks.push(processedData);
       }
     };
 
-    // Routing: Mic -> Gain -> HPF -> Presence -> Air -> Compressor -> Limiter -> Capture
+    // Routing: Mic -> Gain -> HPF -> Presence -> DeEsser -> Air -> Compressor -> Limiter -> Capture
     const micSource = this.outputAudioContext.createMediaStreamSource(this.mediaStream);
     const micGain = this.outputAudioContext.createGain();
     micGain.gain.value = 1.0; 
@@ -191,7 +214,8 @@ export class LiveClient {
     micSource.connect(micGain);
     micGain.connect(this.recordingHighPass);
     this.recordingHighPass.connect(this.recordingPresence);
-    this.recordingPresence.connect(this.recordingAir);
+    this.recordingPresence.connect(this.recordingDeEsser);
+    this.recordingDeEsser.connect(this.recordingAir);
     this.recordingAir.connect(this.recordingCompressor);
     this.recordingCompressor.connect(this.recordingLimiter);
     this.recordingLimiter.connect(this.recordingProcessor);
@@ -201,23 +225,15 @@ export class LiveClient {
   public getSessionRecording(): globalThis.Blob | null {
     if (this.recordedChunks.length === 0) return null;
 
-    // Advanced Peak Normalization
-    let maxVal = 0;
-    for (const chunk of this.recordedChunks) {
-      for (let i = 0; i < chunk.length; i++) {
-        const absVal = Math.abs(chunk[i]);
-        if (absVal > maxVal) maxVal = absVal;
-      }
-    }
-
-    const targetPeak = 0.95; // -0.5dB
-    if (maxVal > 0) {
-      const scale = targetPeak / maxVal;
-      for (const chunk of this.recordedChunks) {
-        for (let i = 0; i < chunk.length; i++) {
-          chunk[i] *= scale;
-        }
-      }
+    // Advanced Normalization based on Quality
+    if (this.quality === 'studio') {
+      // RMS Normalization for consistent perceived loudness
+      normalizeAudioChunks(this.recordedChunks, 'rms', 0.15); // -16dB approx
+      // Followed by safe peak limiting
+      normalizeAudioChunks(this.recordedChunks, 'peak', 0.98);
+    } else {
+      // Standard Peak Normalization
+      normalizeAudioChunks(this.recordedChunks, 'peak', 0.95);
     }
 
     return float32ToWav(this.recordedChunks, AUDIO_SAMPLE_RATE_OUTPUT);
@@ -261,7 +277,7 @@ export class LiveClient {
     if (!this.inputAudioContext || !this.mediaStream || !this.inputAnalyser) return;
 
     this.source = this.inputAudioContext.createMediaStreamSource(this.mediaStream);
-    this.processor = this.inputAudioContext.createScriptProcessor(2048, 1, 1);
+    this.processor = this.inputAudioContext.createScriptProcessor(512, 1, 1);
 
     this.processor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
@@ -390,6 +406,10 @@ export class LiveClient {
     if (this.recordingPresence) {
       this.recordingPresence.disconnect();
       this.recordingPresence = null;
+    }
+    if (this.recordingDeEsser) {
+      this.recordingDeEsser.disconnect();
+      this.recordingDeEsser = null;
     }
     if (this.recordingAir) {
       this.recordingAir.disconnect();

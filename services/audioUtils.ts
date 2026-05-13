@@ -110,3 +110,55 @@ export function float32ToWav(chunks: Float32Array[], sampleRate: number = 24000)
   }
   return pcmToWav(new Uint8Array(pcmData.buffer), sampleRate);
 }
+
+/**
+ * Normalizes an array of Float32Array chunks.
+ * Supports Peak and RMS normalization.
+ */
+export function normalizeAudioChunks(chunks: Float32Array[], type: 'peak' | 'rms' = 'peak', target: number = 0.95): void {
+  if (chunks.length === 0) return;
+
+  if (type === 'peak') {
+    let maxVal = 0;
+    for (const chunk of chunks) {
+      for (let i = 0; i < chunk.length; i++) {
+        const absVal = Math.abs(chunk[i]);
+        if (absVal > maxVal) maxVal = absVal;
+      }
+    }
+
+    if (maxVal > 0) {
+      const scale = target / maxVal;
+      for (const chunk of chunks) {
+        for (let i = 0; i < chunk.length; i++) {
+          chunk[i] *= scale;
+        }
+      }
+    }
+  } else if (type === 'rms') {
+    let sumSquares = 0;
+    let totalSamples = 0;
+    for (const chunk of chunks) {
+      for (let i = 0; i < chunk.length; i++) {
+        sumSquares += chunk[i] * chunk[i];
+      }
+      totalSamples += chunk.length;
+    }
+
+    const rms = Math.sqrt(sumSquares / totalSamples);
+    if (rms > 0) {
+      // Target RMS is usually around -18dB to -24dB for speech
+      // target here is interpreted as a linear value
+      const scale = target / rms;
+      
+      // Safety: limit scale to prevent extreme clipping
+      const safeScale = Math.min(scale, 5.0); 
+
+      for (const chunk of chunks) {
+        for (let i = 0; i < chunk.length; i++) {
+          chunk[i] = Math.max(-1, Math.min(1, chunk[i] * safeScale));
+        }
+      }
+    }
+  }
+}

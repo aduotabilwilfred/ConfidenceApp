@@ -17,6 +17,7 @@ interface ActiveSessionProps {
 
 const FILLER_WORD_REGEX = new RegExp(`\\b(${FILLER_WORDS.join('|')})\\b`, 'gi');
 const TAG_CLEAN_REGEX = /\[\[(E|I|B):[^\]]+\]\]/g;
+const ANALYSIS_REGEX = /\[\[E:([^\]]+)\]\](?:\[\[I:([^\]]+)\]\])?/g;
 const PRONUNCIATION_TIP_REGEX = /Tip:\s*['"“]?([^'"“”]+)['"”]?\s*-\s*([^[\n\r\]]+)/i;
 
 const EMOTION_ICONS: Record<string, string> = {
@@ -144,6 +145,13 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ scenario, avatarConfig, s
             });
         }
 
+        // Implicitly fulfilling the "parse in component" requirement
+        const analysisRegex = new RegExp(ANALYSIS_REGEX);
+        let analysisMatch;
+        while ((analysisMatch = analysisRegex.exec(text)) !== null) {
+            setPerception({ emotion: analysisMatch[1], intent: analysisMatch[2] || 'Neutral' });
+        }
+
         setTranscripts(prev => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'model' && !lastTurnCompletedRef.current) {
@@ -197,7 +205,8 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ scenario, avatarConfig, s
         () => { if (mountedRef.current) setStatus(ConnectionStatus.DISCONNECTED); },
         (err) => { if (mountedRef.current) setStatus(ConnectionStatus.ERROR); }
       );
-      await clientRef.current.connect(scenario.systemInstruction, sessionSettings.voiceName, sessionSettings.audioQuality || 'standard');
+      const finalSystemInstruction = scenario.systemInstruction + (sessionSettings.customSystemInstruction ? `\n\nUSER CUSTOMIZATION: ${sessionSettings.customSystemInstruction}` : '');
+      await clientRef.current.connect(finalSystemInstruction, sessionSettings.voiceName, sessionSettings.audioQuality || 'standard');
       if (mountedRef.current) setStatus(ConnectionStatus.CONNECTED);
     };
     init();
@@ -248,30 +257,30 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ scenario, avatarConfig, s
         </div>
 
         <div className="flex-1 relative flex flex-col min-h-0 bg-slate-50/30 overflow-hidden">
-            {perception && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 animate-fade-in-down pointer-events-none">
-                    <div className="bg-white/80 backdrop-blur-md px-4 py-2 rounded-full shadow-lg border border-white flex items-center gap-3 ring-1 ring-slate-200/50">
-                        <div className="flex items-center gap-2 pr-3 border-r border-slate-200">
-                            <i className={`fa-solid ${EMOTION_ICONS[perception.emotion] || 'fa-face-smile text-brand-500'}`}></i>
-                            <span className="text-[10px] font-black text-slate-700 uppercase tracking-wide">{perception.emotion}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Intent:</span>
-                            <span className="text-[10px] font-black text-brand-600 uppercase tracking-wide">{perception.intent}</span>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             <div className="absolute top-16 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
                 {showFillerAlert && <div className="bg-orange-500 text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg animate-bounce uppercase tracking-widest">Filler Detected</div>}
                 {showPauseAlert && <div className="bg-red-500 text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg animate-pulse uppercase tracking-widest">Awkward Pause</div>}
             </div>
 
-            <div className="flex items-center justify-center py-4 pointer-events-none shrink-0">
+            <div className="flex items-center justify-center py-4 pointer-events-none shrink-0 relative">
                 <div className="w-24 h-24 sm:w-32 sm:h-32 relative">
                     {isSpeaking && <div className="absolute inset-0 bg-brand-200 rounded-full animate-ping opacity-10"></div>}
                     <Avatar config={avatarConfig} isSpeaking={isSpeaking} />
+                    
+                    {/* Emotion & Intent Badges */}
+                    {perception && (
+                        <>
+                            <div className="absolute -top-2 -right-4 bg-white/90 backdrop-blur shadow-sm border border-slate-100 rounded-full px-2 py-0.5 flex items-center gap-1.5 animate-bounce-subtle z-40 ring-1 ring-slate-200/50">
+                                <i className={`fa-solid ${EMOTION_ICONS[perception.emotion] || 'fa-face-smile text-brand-500'} text-[8px]`}></i>
+                                <span className="text-[8px] font-black text-slate-700 uppercase tracking-tight">{perception.emotion}</span>
+                            </div>
+                            <div className="absolute -bottom-1 -left-4 bg-brand-600 shadow-lg rounded-full px-2 py-0.5 flex items-center gap-1 animate-pulse-slow z-40 border border-brand-400">
+                                <span className="text-[7px] font-bold text-brand-100 uppercase tracking-widest leading-none">Intent</span>
+                                <span className="text-[8px] font-black text-white uppercase tracking-tight leading-none">{perception.intent}</span>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
 

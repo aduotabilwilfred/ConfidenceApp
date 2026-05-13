@@ -71,6 +71,7 @@ export interface SessionSettings {
   voiceName: string;
   language: string;
   audioQuality?: AudioQuality;
+  customSystemInstruction?: string;
 }
 
 export interface GrammarCorrection {

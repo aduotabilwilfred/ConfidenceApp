@@ -39,6 +39,10 @@ const SessionSetup: React.FC<SessionSetupProps> = ({ scenario, onStart, onCancel
       setSettings(prev => ({ ...prev, audioQuality: quality }));
   };
 
+  const updateCustomInstruction = (text: string) => {
+      setSettings(prev => ({ ...prev, customSystemInstruction: text }));
+  };
+
   const filteredVoices = Object.entries(VOICE_METADATA).filter(([name, meta]) => {
       if (selectedGender === 'All') return true;
       return meta.gender === selectedGender;
@@ -184,6 +188,22 @@ const SessionSetup: React.FC<SessionSetupProps> = ({ scenario, onStart, onCancel
                 </div>
                 <p className="mt-3 text-[10px] text-slate-400 italic leading-relaxed">
                     Studio profile applies advanced EQ and normalization for crystal-clear playback.
+                </p>
+            </div>
+            
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm md:col-span-2">
+                <label className="block text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+                    <i className="fa-solid fa-wand-magic-sparkles text-brand-500"></i>
+                    Customize Coach's Focus
+                </label>
+                <textarea 
+                    value={settings.customSystemInstruction || ''}
+                    onChange={(e) => updateCustomInstruction(e.target.value)}
+                    placeholder={`e.g., "Focus on technical business vocabulary" or "Be more critical about my pronunciation"`}
+                    className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all resize-none font-medium text-slate-700"
+                />
+                <p className="mt-2 text-[10px] text-slate-400 italic">
+                    These instructions will be appended to the scenario's base logic to tailor the experience to your needs.
                 </p>
             </div>
         </div>
