@@ -16,8 +16,9 @@ interface ActiveSessionProps {
 }
 
 const FILLER_WORD_REGEX = new RegExp(`\\b(${FILLER_WORDS.join('|')})\\b`, 'gi');
-const TAG_CLEAN_REGEX = /\[\[(E|I|B):[^\]]+\]\]/g;
-const ANALYSIS_REGEX = /\[\[E:([^\]]+)\]\](?:\[\[I:([^\]]+)\]\])?/g;
+const TAG_CLEAN_REGEX = /\[{1,2}(?:E|I|B|Emotion|Intent|Behavior):\s*[^\]]+\]{1,2}/gi;
+const EMOTION_REGEX = /\[{1,2}(?:E|Emotion):\s*([^\]]+)\]{1,2}/i;
+const INTENT_REGEX = /\[{1,2}(?:I|Intent):\s*([^\]]+)\]{1,2}/i;
 const PRONUNCIATION_TIP_REGEX = /Tip:\s*['"“]?([^'"“”]+)['"”]?\s*-\s*([^[\n\r\]]+)/i;
 
 const EMOTION_ICONS: Record<string, string> = {
@@ -146,10 +147,13 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ scenario, avatarConfig, s
         }
 
         // Implicitly fulfilling the "parse in component" requirement
-        const analysisRegex = new RegExp(ANALYSIS_REGEX);
-        let analysisMatch;
-        while ((analysisMatch = analysisRegex.exec(text)) !== null) {
-            setPerception({ emotion: analysisMatch[1], intent: analysisMatch[2] || 'Neutral' });
+        const emotionMatch = text.match(EMOTION_REGEX);
+        const intentMatch = text.match(INTENT_REGEX);
+        if (emotionMatch || intentMatch) {
+            setPerception(prev => ({
+                emotion: emotionMatch ? emotionMatch[1].trim() : (prev?.emotion || 'Neutral'),
+                intent: intentMatch ? intentMatch[1].trim() : (prev?.intent || 'Neutral')
+            }));
         }
 
         setTranscripts(prev => {

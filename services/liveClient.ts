@@ -10,12 +10,13 @@ export type GroundingCallback = (metadata: any) => void;
 export type AnalysisCallback = (emotion: string, intent: string) => void;
 export type BreathCallback = (phase: 'IN' | 'HOLD' | 'OUT' | 'END') => void;
 
-const ANALYSIS_REGEX = /\[\[E:([^\]]+)\]\](?:\[\[I:([^\]]+)\]\])?/g;
+const EMOTION_REGEX = /\[{1,2}(?:E|Emotion):\s*([^\]]+)\]{1,2}/gi;
+const INTENT_REGEX = /\[{1,2}(?:I|Intent):\s*([^\]]+)\]{1,2}/gi;
 const BREATH_REGEX = /\[\[B:(\w+)\]\]/g;
 
 export class LiveClient {
   private ai: GoogleGenAI;
-  private model: string = 'gemini-2.5-flash-native-audio-preview-12-2025';
+  private model: string = 'gemini-3.1-flash-live-preview';
   private inputAudioContext: AudioContext | null = null;
   private outputAudioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
@@ -306,10 +307,14 @@ export class LiveClient {
     if (modelTranscriptChunk) {
        this.currentModelTurnText += modelTranscriptChunk;
        
-       let analysisMatch;
-       const analysisRegexClone = new RegExp(ANALYSIS_REGEX);
-       while ((analysisMatch = analysisRegexClone.exec(this.currentModelTurnText)) !== null) {
-         this.onAnalysis(analysisMatch[1], analysisMatch[2] || 'Neutral');
+       const emotionMatch = EMOTION_REGEX.exec(this.currentModelTurnText);
+       const intentMatch = INTENT_REGEX.exec(this.currentModelTurnText);
+       
+       if (emotionMatch || intentMatch) {
+         this.onAnalysis(
+           emotionMatch ? emotionMatch[1] : 'Neutral',
+           intentMatch ? intentMatch[1] : 'Neutral'
+         );
        }
 
        let breathMatch;
